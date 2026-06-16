@@ -1,7 +1,7 @@
 import type {
   Part, Category, Supplier, StockBatch, StockIn, StockOut,
   TransferOrder, Store, StocktakeOrder, PriceHistory, BatchPhoto,
-  OperationLog, Employee
+  OperationLog, Employee, StoreStock
 } from '@/types';
 
 export const MOCK_STORES: Store[] = [
@@ -169,21 +169,21 @@ export const MOCK_STOCK_OUT: StockOut[] = [
 export const MOCK_TRANSFER: TransferOrder[] = [
   {
     id: 't1', no: 'TR20260614TR001', fromStoreId: 's1', toStoreId: 's2',
-    status: 'pending_receive',
+    status: 'pending_receive', stockDeducted: true,
     items: [{ partId: 'p2', qty: 3 }, { partId: 'p4', qty: 5 }],
-    applicantId: 'e1', shippedAt: d(1), remark: '人民路店申请电池补货',
+    applicantId: 'e1', shippedAt: d(1), arrivedAt: d(1), remark: '人民路店申请电池补货',
     createdAt: d(2),
   },
   {
     id: 't2', no: 'TR20260615TR002', fromStoreId: 's1', toStoreId: 's3',
-    status: 'in_transit',
+    status: 'in_transit', stockDeducted: true,
     items: [{ partId: 'p7', qty: 10 }],
     applicantId: 'e3', shippedAt: d(0),
     createdAt: d(0),
   },
   {
     id: 't3', no: 'TR20260610TR003', fromStoreId: 's2', toStoreId: 's1',
-    status: 'completed',
+    status: 'completed', stockDeducted: true,
     items: [{ partId: 'p6', qty: 5 }],
     applicantId: 'e2', shippedAt: d(6), receivedAt: d(5),
     createdAt: d(7),
@@ -222,4 +222,22 @@ export const MOCK_LOGS: OperationLog[] = [
   { id: 'l4', operatorId: 'e2', module: '出库', action: 'create', targetId: 'so1', targetType: 'StockOut', createdAt: d(2) },
   { id: 'l5', operatorId: 'e1', module: '调拨', action: 'confirm', targetId: 't2', targetType: 'TransferOrder', createdAt: d(0) },
   { id: 'l6', operatorId: 'e1', module: '盘点', action: 'confirm', targetId: 'st1', targetType: 'StocktakeOrder', createdAt: d(15) },
+];
+
+export const MOCK_STORE_STOCKS: StoreStock[] = [
+  { id: 'ss1', storeId: 's1', partId: 'p1', stockQty: 10, updatedAt: d(1) },
+  { id: 'ss2', storeId: 's2', partId: 'p1', stockQty: 2, updatedAt: d(5) },
+  { id: 'ss3', storeId: 's1', partId: 'p2', stockQty: 8, updatedAt: d(2) },
+  { id: 'ss4', storeId: 's1', partId: 'p3', stockQty: 3, updatedAt: d(3) },
+  { id: 'ss5', storeId: 's1', partId: 'p4', stockQty: 18, updatedAt: d(1) },
+  { id: 'ss6', storeId: 's1', partId: 'p5', stockQty: 2, updatedAt: d(5) },
+  { id: 'ss7', storeId: 's1', partId: 'p6', stockQty: 12, updatedAt: d(4) },
+  { id: 'ss8', storeId: 's2', partId: 'p6', stockQty: 3, updatedAt: d(5) },
+  { id: 'ss9', storeId: 's1', partId: 'p7', stockQty: 35, updatedAt: d(1) },
+  { id: 'ss10', storeId: 's1', partId: 'p8', stockQty: 6, updatedAt: d(6) },
+  { id: 'ss11', storeId: 's1', partId: 'p9', stockQty: 1, updatedAt: d(20) },
+  { id: 'ss12', storeId: 's1', partId: 'p11', stockQty: 2, updatedAt: d(60) },
+  { id: 'ss13', storeId: 's2', partId: 'p11', stockQty: 2, updatedAt: d(60) },
+  { id: 'ss14', storeId: 's1', partId: 'p12', stockQty: 40, updatedAt: d(100) },
+  { id: 'ss15', storeId: 's3', partId: 'p12', stockQty: 10, updatedAt: d(100) },
 ];

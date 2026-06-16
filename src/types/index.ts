@@ -113,7 +113,9 @@ export interface TransferOrder {
   status: TransferStatus;
   items: TransferItem[];
   applicantId: string;
+  stockDeducted: boolean;
   shippedAt?: string;
+  arrivedAt?: string;
   receivedAt?: string;
   remark?: string;
   createdAt: string;
@@ -124,6 +126,14 @@ export interface Store {
   name: string;
   address: string;
   phone: string;
+}
+
+export interface StoreStock {
+  id: string;
+  storeId: string;
+  partId: string;
+  stockQty: number;
+  updatedAt: string;
 }
 
 export interface StocktakeItem {

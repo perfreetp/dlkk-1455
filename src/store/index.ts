@@ -4,13 +4,13 @@ import type {
   Part, Category, Supplier, StockBatch, StockIn, StockOut, TransferOrder,
   Store, StocktakeOrder, PriceHistory, BatchPhoto, OperationLog, Employee,
   StockInSource, StockOutType, QualityLevel, StockInItem, StockOutItem,
-  TransferItem, StocktakeItem, PriceField, ToastMessage, PhotoType
+  TransferItem, StocktakeItem, PriceField, ToastMessage, PhotoType, StoreStock
 } from '@/types';
 import { uid } from '@/utils/id';
 import { generateOrderNo } from '@/utils/format';
 import {
   MOCK_PARTS, MOCK_CATEGORIES, MOCK_SUPPLIERS, MOCK_STOCK_BATCHES,
-  MOCK_STOCK_IN, MOCK_STOCK_OUT, MOCK_TRANSFER, MOCK_STORES,
+  MOCK_STOCK_IN, MOCK_STOCK_OUT, MOCK_TRANSFER, MOCK_STORES, MOCK_STORE_STOCKS,
   MOCK_STOCKTAKE, MOCK_PRICE_HISTORY, MOCK_BATCH_PHOTOS, MOCK_LOGS, MOCK_EMPLOYEES
 } from './mockData';
 
@@ -24,6 +24,7 @@ interface RootState {
   stockOutList: StockOut[];
   transferOrders: TransferOrder[];
   stores: Store[];
+  storeStocks: StoreStock[];
   stocktakeOrders: StocktakeOrder[];
   priceHistory: PriceHistory[];
   batchPhotos: BatchPhoto[];
@@ -46,9 +47,14 @@ interface RootState {
   updateSupplier: (id: string, data: Partial<Supplier>) => void;
   deleteSupplier: (id: string) => void;
 
+  getPartStockByStore: (partId: string, storeId: string) => number;
+  getPartStockAllStores: (partId: string) => number;
+  updateStockByStore: (storeId: string, partId: string, delta: number) => void;
+
   stockIn: (params: {
     source: StockInSource; supplierId?: string; purchaseOrderNo?: string;
     salvageDeviceNo?: string; items: StockInItem[]; remark?: string;
+    storeId?: string;
     batchPhotos?: { batchNo: string; photos: { type: PhotoType; url: string; remark?: string }[] }[];
   }) => { success: boolean; message?: string };
   addBatchPhoto: (batchId: string, type: PhotoType, url: string, remark?: string) => void;
@@ -57,10 +63,12 @@ interface RootState {
   stockOut: (params: {
     type: StockOutType; repairOrderNo?: string; customerName?: string;
     damageReason?: string; user?: string; items: StockOutItem[]; remark?: string;
+    storeId?: string;
   }) => { success: boolean; message?: string };
 
   createTransfer: (toStoreId: string, fromStoreId: string, items: TransferItem[], remark?: string) => void;
   shipTransfer: (id: string) => void;
+  arriveTransfer: (id: string) => void;
   receiveTransfer: (id: string) => void;
   cancelTransfer: (id: string) => void;
 
@@ -82,7 +90,7 @@ export const useStore = create<RootState>()(
     (set, get) => ({
       initialized: false,
       parts: [], categories: [], suppliers: [], stockBatches: [], stockInList: [],
-      stockOutList: [], transferOrders: [], stores: [], stocktakeOrders: [],
+      stockOutList: [], transferOrders: [], stores: [], storeStocks: [], stocktakeOrders: [],
       priceHistory: [], batchPhotos: [], operationLogs: [], employees: [],
       currentUserId: 'e1', toasts: [],
 
@@ -93,7 +101,7 @@ export const useStore = create<RootState>()(
           parts: MOCK_PARTS, categories: MOCK_CATEGORIES, suppliers: MOCK_SUPPLIERS,
           stockBatches: MOCK_STOCK_BATCHES, stockInList: MOCK_STOCK_IN,
           stockOutList: MOCK_STOCK_OUT, transferOrders: MOCK_TRANSFER,
-          stores: MOCK_STORES, stocktakeOrders: MOCK_STOCKTAKE,
+          stores: MOCK_STORES, storeStocks: MOCK_STORE_STOCKS, stocktakeOrders: MOCK_STOCKTAKE,
           priceHistory: MOCK_PRICE_HISTORY, batchPhotos: MOCK_BATCH_PHOTOS,
           operationLogs: MOCK_LOGS, employees: MOCK_EMPLOYEES,
         });
@@ -176,8 +184,39 @@ export const useStore = create<RootState>()(
         get().writeLog('供应商', 'delete', id, 'Supplier');
       },
 
+      getPartStockByStore: (partId, storeId) => {
+        const rec = get().storeStocks.find(s => s.partId === partId && s.storeId === storeId);
+        return rec?.stockQty ?? 0;
+      },
+      getPartStockAllStores: (partId) => {
+        return get().storeStocks
+          .filter(s => s.partId === partId)
+          .reduce((sum, s) => sum + s.stockQty, 0);
+      },
+      updateStockByStore: (storeId, partId, delta) => {
+        const now = new Date().toISOString();
+        set(s => {
+          const existing = s.storeStocks.find(r => r.storeId === storeId && r.partId === partId);
+          if (existing) {
+            return {
+              storeStocks: s.storeStocks.map(r =>
+                r.id === existing.id
+                  ? { ...r, stockQty: Math.max(0, r.stockQty + delta), updatedAt: now }
+                  : r
+              ),
+            };
+          }
+          const newRec: StoreStock = {
+            id: uid('ss_'), storeId, partId,
+            stockQty: Math.max(0, delta), updatedAt: now,
+          };
+          return { storeStocks: [newRec, ...s.storeStocks] };
+        });
+      },
+
       stockIn: (params) => {
         const now = new Date().toISOString();
+        const storeId = params.storeId ?? get().stores[0]?.id;
         const totalAmount = params.items.reduce((sum, i) => sum + i.qty * i.purchasePrice, 0);
         const order: StockIn = {
           id: uid('si_'), no: generateOrderNo('IN'), ...params, totalAmount,
@@ -196,6 +235,7 @@ export const useStore = create<RootState>()(
             const newPrice = newQty > 0 ? (oldTotalValue + addValue) / newQty : item.purchasePrice;
             newParts[idx] = { ...newParts[idx], stockQty: newQty, purchasePrice: newPrice, lastMoveDate: now, updatedAt: now };
           }
+          if (storeId) get().updateStockByStore(storeId, item.partId, item.qty);
           const batchId = uid('b_');
           batchMap.set(item.batchNo, batchId);
           newBatches.push({
@@ -240,9 +280,11 @@ export const useStore = create<RootState>()(
       },
 
       stockOut: (params) => {
+        const storeId = params.storeId ?? get().stores[0]?.id;
         for (const item of params.items) {
           const part = get().getPartById(item.partId);
-          if (!part || part.stockQty < item.qty) {
+          const storeStock = storeId ? get().getPartStockByStore(item.partId, storeId) : 0;
+          if (!part || (storeId ? storeStock : part.stockQty) < item.qty) {
             get().addToast('error', `${part?.name ?? '备件'} 库存不足`);
             return { success: false, message: `${part?.name ?? '备件'} 库存不足` };
           }
@@ -259,6 +301,7 @@ export const useStore = create<RootState>()(
           if (idx >= 0) {
             newParts[idx] = { ...newParts[idx], stockQty: newParts[idx].stockQty - item.qty, lastMoveDate: now, updatedAt: now };
           }
+          if (storeId) get().updateStockByStore(storeId, item.partId, -item.qty);
         }
         set(s => ({
           stockOutList: [order, ...s.stockOutList],
@@ -270,45 +313,66 @@ export const useStore = create<RootState>()(
       },
 
       createTransfer: (toStoreId, fromStoreId, items, remark) => {
-        for (const item of items) {
-          const part = get().getPartById(item.partId);
-          if (!part || part.stockQty < item.qty) {
-            get().addToast('error', `${part?.name ?? '备件'} 库存不足，无法调拨`);
-            return;
-          }
-        }
         const now = new Date().toISOString();
         const order: TransferOrder = {
           id: uid('t_'), no: generateOrderNo('TR'), fromStoreId, toStoreId,
           status: 'pending_ship', items, applicantId: get().currentUserId,
-          remark, createdAt: now,
+          stockDeducted: false, remark, createdAt: now,
         };
+        set(s => ({
+          transferOrders: [order, ...s.transferOrders],
+        }));
+        get().writeLog('调拨', 'create', order.id, 'TransferOrder');
+        get().addToast('success', `调拨申请已创建：${order.no}，待发货`);
+      },
+      shipTransfer: (id) => {
+        const order = get().transferOrders.find(t => t.id === id);
+        if (!order) return;
+        for (const item of order.items) {
+          const storeStock = get().getPartStockByStore(item.partId, order.fromStoreId);
+          if (storeStock < item.qty) {
+            const p = get().getPartById(item.partId);
+            get().addToast('error', `${p?.name ?? '备件'} 在调出门店库存不足`);
+            return;
+          }
+        }
+        const now = new Date().toISOString();
         const newParts = [...get().parts];
-        for (const item of items) {
+        for (const item of order.items) {
           const idx = newParts.findIndex(p => p.id === item.partId);
           if (idx >= 0) {
             newParts[idx] = { ...newParts[idx], stockQty: newParts[idx].stockQty - item.qty, lastMoveDate: now, updatedAt: now };
           }
+          get().updateStockByStore(order.fromStoreId, item.partId, -item.qty);
         }
         set(s => ({
-          transferOrders: [order, ...s.transferOrders],
+          transferOrders: s.transferOrders.map(t =>
+            t.id === id ? { ...t, status: 'in_transit', stockDeducted: true, shippedAt: now } : t
+          ),
           parts: newParts,
         }));
-        get().writeLog('调拨', 'create', order.id, 'TransferOrder');
-        get().addToast('success', `调拨申请已创建：${order.no}，调出方库存已扣减`);
+        get().writeLog('调拨', 'confirm', id, 'TransferOrder');
+        get().addToast('success', '已确认发货，调出方库存已扣减');
       },
-      shipTransfer: (id) => {
+      arriveTransfer: (id) => {
+        const order = get().transferOrders.find(t => t.id === id);
+        if (!order || order.status !== 'in_transit') return;
+        const now = new Date().toISOString();
         set(s => ({
           transferOrders: s.transferOrders.map(t =>
-            t.id === id ? { ...t, status: 'in_transit', shippedAt: new Date().toISOString() } : t
+            t.id === id ? { ...t, status: 'pending_receive', arrivedAt: now } : t
           ),
         }));
-        get().writeLog('调拨', 'confirm', id, 'TransferOrder');
-        get().addToast('success', '已确认发货');
+        get().writeLog('调拨', 'update', id, 'TransferOrder');
+        get().addToast('success', '货物已到店，待目标门店签收');
       },
       receiveTransfer: (id) => {
         const order = get().transferOrders.find(t => t.id === id);
         if (!order) return;
+        if (!order.stockDeducted) {
+          get().addToast('error', '该单未扣减调出方库存，无法直接收货，请走正常调拨流程');
+          return;
+        }
         const now = new Date().toISOString();
         const newParts = [...get().parts];
         for (const item of order.items) {
@@ -316,6 +380,7 @@ export const useStore = create<RootState>()(
           if (idx >= 0) {
             newParts[idx] = { ...newParts[idx], stockQty: newParts[idx].stockQty + item.qty, lastMoveDate: now, updatedAt: now };
           }
+          get().updateStockByStore(order.toStoreId, item.partId, item.qty);
         }
         set(s => ({
           transferOrders: s.transferOrders.map(t => t.id === id ? { ...t, status: 'completed', receivedAt: now } : t),
@@ -328,11 +393,14 @@ export const useStore = create<RootState>()(
         const order = get().transferOrders.find(t => t.id === id);
         if (!order) return;
         const now = new Date().toISOString();
-        const newParts = [...get().parts];
-        for (const item of order.items) {
-          const idx = newParts.findIndex(p => p.id === item.partId);
-          if (idx >= 0) {
-            newParts[idx] = { ...newParts[idx], stockQty: newParts[idx].stockQty + item.qty, lastMoveDate: now, updatedAt: now };
+        let newParts = [...get().parts];
+        if (order.stockDeducted) {
+          for (const item of order.items) {
+            const idx = newParts.findIndex(p => p.id === item.partId);
+            if (idx >= 0) {
+              newParts[idx] = { ...newParts[idx], stockQty: newParts[idx].stockQty + item.qty, lastMoveDate: now, updatedAt: now };
+            }
+            get().updateStockByStore(order.fromStoreId, item.partId, item.qty);
           }
         }
         set(s => ({
@@ -340,7 +408,7 @@ export const useStore = create<RootState>()(
           parts: newParts,
         }));
         get().writeLog('调拨', 'update', id, 'TransferOrder');
-        get().addToast('success', '已取消调拨，库存已恢复');
+        get().addToast('success', order.stockDeducted ? '已取消调拨，调出方库存已恢复' : '已取消调拨');
       },
 
       createStocktake: (partIds) => {

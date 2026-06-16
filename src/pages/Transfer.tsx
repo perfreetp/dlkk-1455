@@ -8,7 +8,7 @@ import StatusBadge from '@/components/common/StatusBadge';
 import {
   Package, Truck, MapPin, Plus, Search, Send, CheckCircle,
   XCircle, ChevronDown, ChevronUp, Trash2, Building2, User,
-  Calendar, FileText, AlertCircle
+  Calendar, FileText, AlertCircle, ArrowDownToLine
 } from 'lucide-react';
 import { transferStatusMap, formatDateTime, formatCurrency } from '@/utils/format';
 import type { TransferItem } from '@/types';
@@ -16,8 +16,9 @@ import { cn } from '@/lib/utils';
 
 export default function Transfer() {
   const {
-    transferOrders, stores, parts, currentUserId,
-    createTransfer, shipTransfer, receiveTransfer, cancelTransfer
+    transferOrders, stores, parts, currentUserId, storeStocks,
+    createTransfer, shipTransfer, arriveTransfer, receiveTransfer, cancelTransfer,
+    getPartStockByStore,
   } = useStore();
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -40,12 +41,13 @@ export default function Transfer() {
   const filteredParts = useMemo(() => {
     const keyword = partSearch.trim().toLowerCase();
     return parts.filter(p => {
-      if (p.stockQty <= 0) return false;
+      const qty = fromStoreId ? getPartStockByStore(p.id, fromStoreId) : p.stockQty;
+      if (qty <= 0) return false;
       if (!keyword) return true;
       return p.name.toLowerCase().includes(keyword)
         || p.sku.toLowerCase().includes(keyword);
     });
-  }, [parts, partSearch]);
+  }, [parts, partSearch, fromStoreId, getPartStockByStore]);
 
   const addItem = () => {
     if (!selectedPartId || itemQty <= 0) return;
@@ -97,7 +99,7 @@ export default function Transfer() {
   const getPartName = (id: string) => useStore.getState().getPartById(id)?.name ?? '-';
   const getPartSku = (id: string) => useStore.getState().getPartById(id)?.sku ?? '';
   const getPartPrice = (id: string) => useStore.getState().getPartById(id)?.purchasePrice ?? 0;
-  const getPartStock = (id: string) => useStore.getState().getPartById(id)?.stockQty ?? 0;
+  const getPartStock = (id: string) => fromStoreId ? getPartStockByStore(id, fromStoreId) : (useStore.getState().getPartById(id)?.stockQty ?? 0);
 
   const totalEstimate = items.reduce((sum, it) => sum + it.qty * getPartPrice(it.partId), 0);
   const selectedItemsTotal = items.reduce((sum, it) => sum + it.qty, 0);
@@ -219,21 +221,28 @@ export default function Transfer() {
                           </Button>
                         </>
                       )}
-                      {order.status === 'pending_receive' && (
+                      {order.status === 'in_transit' && (
                         <Button
                           size="sm"
                           variant="secondary"
+                          icon={<ArrowDownToLine className="w-3.5 h-3.5" />}
+                          onClick={(e) => { e.stopPropagation(); arriveTransfer(order.id); }}
+                        >
+                          确认到店
+                        </Button>
+                      )}
+                      {order.status === 'pending_receive' && (
+                        <Button
+                          size="sm"
+                          variant="primary"
                           icon={<CheckCircle className="w-3.5 h-3.5" />}
                           onClick={(e) => { e.stopPropagation(); receiveTransfer(order.id); }}
                         >
                           确认收货
                         </Button>
                       )}
-                      {order.status === 'in_transit' && (
-                        <StatusBadge
-                          label="运输中"
-                          className="bg-blue-50 text-blue-600 border-blue-200"
-                        />
+                      {order.status === 'completed' && (
+                        <StatusBadge label="已完成" className="bg-emerald-50 text-emerald-600 border-emerald-200" />
                       )}
                     </div>
                   </div>
@@ -245,22 +254,50 @@ export default function Transfer() {
                             <span className="text-slate-400">备注：</span>{order.remark}
                           </div>
                         )}
+                        <div className="mb-3 grid grid-cols-3 gap-3 text-[11px]">
+                          <div className="bg-white rounded border border-slate-200 p-2">
+                            <div className="text-slate-400 mb-1">调出门店</div>
+                            <div className="font-semibold text-slate-700">{getStoreName(order.fromStoreId)}</div>
+                          </div>
+                          <div className="bg-white rounded border border-slate-200 p-2">
+                            <div className="text-slate-400 mb-1">调入门店</div>
+                            <div className="font-semibold text-slate-700">{getStoreName(order.toStoreId)}</div>
+                          </div>
+                          <div className="bg-white rounded border border-slate-200 p-2">
+                            <div className="text-slate-400 mb-1">库存状态</div>
+                            <div className="font-semibold text-slate-700">
+                              {order.status === 'pending_ship' && order.stockDeducted && '已扣减调出'}
+                              {order.status === 'pending_ship' && !order.stockDeducted && '待扣减'}
+                              {(order.status === 'in_transit' || order.status === 'pending_receive') && order.stockDeducted && '调出已扣、调入待加'}
+                              {order.status === 'completed' && '两边已对平'}
+                              {order.status === 'cancelled' && '已取消'}
+                            </div>
+                          </div>
+                        </div>
                         <table className="w-full text-sm">
                           <thead>
                             <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
                               <th className="pb-2 font-medium">备件名称</th>
                               <th className="pb-2 font-medium">SKU</th>
                               <th className="pb-2 font-medium text-right">调拨数量</th>
+                              <th className="pb-2 font-medium text-right">调出方库存</th>
+                              <th className="pb-2 font-medium text-right">调入方库存</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {order.items.map(item => (
-                              <tr key={item.partId}>
-                                <td className="py-2 text-slate-700 font-medium">{getPartName(item.partId)}</td>
-                                <td className="py-2 text-slate-500 font-mono text-xs">{getPartSku(item.partId)}</td>
-                                <td className="py-2 text-right font-mono font-semibold text-slate-800">{item.qty}</td>
-                              </tr>
-                            ))}
+                            {order.items.map(item => {
+                              const fromStock = getPartStockByStore(item.partId, order.fromStoreId);
+                              const toStock = getPartStockByStore(item.partId, order.toStoreId);
+                              return (
+                                <tr key={item.partId}>
+                                  <td className="py-2 text-slate-700 font-medium">{getPartName(item.partId)}</td>
+                                  <td className="py-2 text-slate-500 font-mono text-xs">{getPartSku(item.partId)}</td>
+                                  <td className="py-2 text-right font-mono font-semibold text-slate-800">{item.qty}</td>
+                                  <td className="py-2 text-right font-mono text-slate-600">{fromStock}</td>
+                                  <td className="py-2 text-right font-mono text-slate-600">{toStock}</td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
