@@ -4,7 +4,7 @@ import type {
   Part, Category, Supplier, StockBatch, StockIn, StockOut, TransferOrder,
   Store, StocktakeOrder, PriceHistory, BatchPhoto, OperationLog, Employee,
   StockInSource, StockOutType, QualityLevel, StockInItem, StockOutItem,
-  TransferItem, StocktakeItem, PriceField, ToastMessage
+  TransferItem, StocktakeItem, PriceField, ToastMessage, PhotoType
 } from '@/types';
 import { uid } from '@/utils/id';
 import { generateOrderNo } from '@/utils/format';
@@ -49,7 +49,10 @@ interface RootState {
   stockIn: (params: {
     source: StockInSource; supplierId?: string; purchaseOrderNo?: string;
     salvageDeviceNo?: string; items: StockInItem[]; remark?: string;
+    batchPhotos?: { batchNo: string; photos: { type: PhotoType; url: string; remark?: string }[] }[];
   }) => { success: boolean; message?: string };
+  addBatchPhoto: (batchId: string, type: PhotoType, url: string, remark?: string) => void;
+  getBatchPhotosByPart: (partId: string) => BatchPhoto[];
 
   stockOut: (params: {
     type: StockOutType; repairOrderNo?: string; customerName?: string;
@@ -182,6 +185,8 @@ export const useStore = create<RootState>()(
         };
         const newParts = [...get().parts];
         const newBatches = [...get().stockBatches];
+        const newPhotos: BatchPhoto[] = [];
+        const batchMap = new Map<string, string>();
         for (const item of params.items) {
           const idx = newParts.findIndex(p => p.id === item.partId);
           if (idx >= 0) {
@@ -191,20 +196,47 @@ export const useStore = create<RootState>()(
             const newPrice = newQty > 0 ? (oldTotalValue + addValue) / newQty : item.purchasePrice;
             newParts[idx] = { ...newParts[idx], stockQty: newQty, purchasePrice: newPrice, lastMoveDate: now, updatedAt: now };
           }
+          const batchId = uid('b_');
+          batchMap.set(item.batchNo, batchId);
           newBatches.push({
-            id: uid('b_'), partId: item.partId, batchNo: item.batchNo,
+            id: batchId, partId: item.partId, batchNo: item.batchNo,
             supplierId: params.supplierId, purchasePrice: item.purchasePrice,
             qty: item.qty, inboundQty: item.qty, source: params.source,
             repairCount: 0, inboundDate: now,
           });
         }
+        if (params.batchPhotos) {
+          for (const bp of params.batchPhotos) {
+            const batchId = batchMap.get(bp.batchNo);
+            if (!batchId) continue;
+            for (const p of bp.photos) {
+              newPhotos.push({
+                id: uid('bp_'), batchId, url: p.url, type: p.type, remark: p.remark,
+              });
+            }
+          }
+        }
         set(s => ({
           stockInList: [order, ...s.stockInList],
           parts: newParts, stockBatches: newBatches,
+          batchPhotos: [...newPhotos, ...s.batchPhotos],
         }));
         get().writeLog('入库', 'create', order.id, 'StockIn');
-        get().addToast('success', `入库成功：${order.no}，共 ${totalAmount.toFixed(2)} 元`);
+        const photoCount = newPhotos.length;
+        get().addToast('success', `入库成功：${order.no}${photoCount > 0 ? `，已添加 ${photoCount} 张批次照片` : ''}`);
         return { success: true };
+      },
+      addBatchPhoto: (batchId, type, url, remark) => {
+        const photo: BatchPhoto = {
+          id: uid('bp_'), batchId, url, type, remark,
+        };
+        set(s => ({ batchPhotos: [photo, ...s.batchPhotos] }));
+        get().writeLog('批次照片', 'create', photo.id, 'BatchPhoto');
+      },
+      getBatchPhotosByPart: (partId) => {
+        const batches = get().stockBatches.filter(b => b.partId === partId);
+        const batchIds = new Set(batches.map(b => b.id));
+        return get().batchPhotos.filter(p => batchIds.has(p.batchId));
       },
 
       stockOut: (params) => {
@@ -238,14 +270,32 @@ export const useStore = create<RootState>()(
       },
 
       createTransfer: (toStoreId, fromStoreId, items, remark) => {
+        for (const item of items) {
+          const part = get().getPartById(item.partId);
+          if (!part || part.stockQty < item.qty) {
+            get().addToast('error', `${part?.name ?? '备件'} 库存不足，无法调拨`);
+            return;
+          }
+        }
+        const now = new Date().toISOString();
         const order: TransferOrder = {
           id: uid('t_'), no: generateOrderNo('TR'), fromStoreId, toStoreId,
           status: 'pending_ship', items, applicantId: get().currentUserId,
-          remark, createdAt: new Date().toISOString(),
+          remark, createdAt: now,
         };
-        set(s => ({ transferOrders: [order, ...s.transferOrders] }));
+        const newParts = [...get().parts];
+        for (const item of items) {
+          const idx = newParts.findIndex(p => p.id === item.partId);
+          if (idx >= 0) {
+            newParts[idx] = { ...newParts[idx], stockQty: newParts[idx].stockQty - item.qty, lastMoveDate: now, updatedAt: now };
+          }
+        }
+        set(s => ({
+          transferOrders: [order, ...s.transferOrders],
+          parts: newParts,
+        }));
         get().writeLog('调拨', 'create', order.id, 'TransferOrder');
-        get().addToast('success', `调拨申请已创建：${order.no}`);
+        get().addToast('success', `调拨申请已创建：${order.no}，调出方库存已扣减`);
       },
       shipTransfer: (id) => {
         set(s => ({
@@ -272,11 +322,25 @@ export const useStore = create<RootState>()(
           parts: newParts,
         }));
         get().writeLog('调拨', 'confirm', id, 'TransferOrder');
-        get().addToast('success', '已确认收货，库存已更新');
+        get().addToast('success', '已确认收货，调入方库存已增加');
       },
       cancelTransfer: (id) => {
-        set(s => ({ transferOrders: s.transferOrders.map(t => t.id === id ? { ...t, status: 'cancelled' } : t) }));
+        const order = get().transferOrders.find(t => t.id === id);
+        if (!order) return;
+        const now = new Date().toISOString();
+        const newParts = [...get().parts];
+        for (const item of order.items) {
+          const idx = newParts.findIndex(p => p.id === item.partId);
+          if (idx >= 0) {
+            newParts[idx] = { ...newParts[idx], stockQty: newParts[idx].stockQty + item.qty, lastMoveDate: now, updatedAt: now };
+          }
+        }
+        set(s => ({
+          transferOrders: s.transferOrders.map(t => t.id === id ? { ...t, status: 'cancelled' } : t),
+          parts: newParts,
+        }));
         get().writeLog('调拨', 'update', id, 'TransferOrder');
+        get().addToast('success', '已取消调拨，库存已恢复');
       },
 
       createStocktake: (partIds) => {

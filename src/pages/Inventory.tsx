@@ -53,7 +53,7 @@ const emptyForm: FormData = {
 export default function Inventory() {
   const navigate = useNavigate();
   const {
-    parts, categories, suppliers, initData, addPart, updatePart, deletePart,
+    parts, categories, suppliers, initData, addPart, updatePart, updatePartPrice, deletePart, getPartById,
   } = useStore();
 
   useEffect(() => { initData(); }, [initData]);
@@ -144,8 +144,15 @@ export default function Inventory() {
       repairCount: 0,
     };
     if (editingId) {
-      const { stockQty, lastMoveDate, repairCount, ...rest } = data;
+      const existing = getPartById(editingId);
+      const { stockQty, lastMoveDate, repairCount, purchasePrice, retailPrice, ...rest } = data;
       updatePart(editingId, rest);
+      if (existing && existing.purchasePrice !== purchasePrice) {
+        updatePartPrice(editingId, 'purchasePrice', purchasePrice);
+      }
+      if (existing && existing.retailPrice !== retailPrice) {
+        updatePartPrice(editingId, 'retailPrice', retailPrice);
+      }
     } else {
       addPart(data);
     }

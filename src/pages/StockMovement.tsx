@@ -44,6 +44,7 @@ export default function StockMovement() {
   const [stockInRemark, setStockInRemark] = useState('');
   const [inPartDropdownOpen, setInPartDropdownOpen] = useState<string | null>(null);
   const [inPartSearch, setInPartSearch] = useState('');
+  const [batchPhotos, setBatchPhotos] = useState<Record<string, { type: 'invoice' | 'package' | 'part'; url: string; remark?: string }[]>>({});
 
   const [stockOutType, setStockOutType] = useState<StockOutType>('repair');
   const [repairOrderNo, setRepairOrderNo] = useState('');
@@ -90,9 +91,42 @@ export default function StockMovement() {
   };
 
   const updateStockInItem = (uid: string, field: keyof StockInFormItem, value: string | number) => {
+    const oldItem = stockInItems.find(i => i.uid === uid);
+    const oldBatchNo = oldItem?.batchNo || '';
     setStockInItems(stockInItems.map(i =>
       i.uid === uid ? { ...i, [field]: value } : i
     ));
+    if (oldBatchNo && (field === 'batchNo') && value !== oldBatchNo) {
+      const newBatchNo = String(value);
+      setBatchPhotos(prev => {
+        const next = { ...prev };
+        if (next[oldBatchNo] && !next[newBatchNo]) {
+          next[newBatchNo] = next[oldBatchNo];
+        }
+        delete next[oldBatchNo];
+        return next;
+      });
+    }
+  };
+
+  const addBatchPhoto = (batchNo: string, type: 'invoice' | 'package' | 'part') => {
+    const typePrompts: Record<string, string> = {
+      invoice: 'purchase%20order%20invoice%20document',
+      package: 'shipping%20package%20box',
+      part: 'electronics%20repair%20parts%20close%20up',
+    };
+    const url = `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(typePrompts[type] + ' ' + Date.now())}&image_size=square`;
+    setBatchPhotos(prev => ({
+      ...prev,
+      [batchNo]: [...(prev[batchNo] || []), { type, url }],
+    }));
+  };
+
+  const removeBatchPhoto = (batchNo: string, index: number) => {
+    setBatchPhotos(prev => ({
+      ...prev,
+      [batchNo]: (prev[batchNo] || []).filter((_, i) => i !== index),
+    }));
   };
 
   const stockInTotal = useMemo(() => {
@@ -179,6 +213,9 @@ export default function StockMovement() {
   const handleStockIn = () => {
     if (!validateStockIn()) return;
     const items: StockInItem[] = stockInItems.map(({ uid, ...rest }) => rest);
+    const photos = Object.entries(batchPhotos)
+      .filter(([bn]) => stockInItems.some(i => i.batchNo === bn))
+      .map(([batchNo, photos]) => ({ batchNo, photos }));
     const result = stockIn({
       source: stockInSource,
       supplierId: stockInSource === 'purchase' ? supplierId : undefined,
@@ -186,6 +223,7 @@ export default function StockMovement() {
       salvageDeviceNo: stockInSource === 'salvage' ? salvageDeviceNo.trim() : undefined,
       items,
       remark: stockInRemark.trim() || undefined,
+      batchPhotos: photos.length > 0 ? photos : undefined,
     });
     if (result.success) {
       setSupplierId('');
@@ -193,6 +231,7 @@ export default function StockMovement() {
       setSalvageDeviceNo('');
       setStockInItems([]);
       setStockInRemark('');
+      setBatchPhotos({});
     }
   };
 
@@ -555,6 +594,80 @@ export default function StockMovement() {
                 </table>
               </div>
             </div>
+
+            {stockInItems.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-slate-600 mb-3 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5" />
+                  批次照片
+                </div>
+                <div className="space-y-4">
+                  {stockInItems
+                    .filter(i => i.batchNo.trim() && i.partId)
+                    .map(item => {
+                      const part = getPartById(item.partId);
+                      const photos = batchPhotos[item.batchNo] || [];
+                      return (
+                        <div key={item.uid} className="border border-slate-200 rounded-[2px] p-4 bg-slate-50/40">
+                          <div className="flex items-center justify-between mb-3">
+                            <div>
+                              <span className="text-sm font-medium text-slate-800">{part?.name}</span>
+                              <span className="ml-2 text-xs font-mono text-slate-500">批次: {item.batchNo}</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => addBatchPhoto(item.batchNo, 'invoice')}
+                                className="h-7 px-2.5 text-xs rounded border border-slate-300 bg-white hover:bg-blue-50 hover:border-blue-400 hover:text-blue-600 transition-colors flex items-center gap-1"
+                              >
+                                📄 加发票
+                              </button>
+                              <button
+                                onClick={() => addBatchPhoto(item.batchNo, 'package')}
+                                className="h-7 px-2.5 text-xs rounded border border-slate-300 bg-white hover:bg-amber-50 hover:border-amber-400 hover:text-amber-600 transition-colors flex items-center gap-1"
+                              >
+                                📦 加包装
+                              </button>
+                              <button
+                                onClick={() => addBatchPhoto(item.batchNo, 'part')}
+                                className="h-7 px-2.5 text-xs rounded border border-slate-300 bg-white hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-600 transition-colors flex items-center gap-1"
+                              >
+                                🔧 加实物
+                              </button>
+                            </div>
+                          </div>
+                          {photos.length === 0 ? (
+                            <div className="text-xs text-slate-400 italic">暂无照片，点击上方按钮添加</div>
+                          ) : (
+                            <div className="flex flex-wrap gap-3">
+                              {photos.map((photo, idx) => (
+                                <div key={idx} className="relative group">
+                                  <div className="w-20 h-20 rounded border border-slate-200 bg-white overflow-hidden">
+                                    <img src={photo.url} alt="batch" className="w-full h-full object-cover" />
+                                  </div>
+                                  <span className={cn(
+                                    'absolute top-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-medium',
+                                    photo.type === 'invoice' ? 'bg-blue-100 text-blue-700' :
+                                    photo.type === 'package' ? 'bg-amber-100 text-amber-700' :
+                                    'bg-emerald-100 text-emerald-700'
+                                  )}>
+                                    {photo.type === 'invoice' ? '发票' : photo.type === 'package' ? '包装' : '实物'}
+                                  </span>
+                                  <button
+                                    onClick={() => removeBatchPhoto(item.batchNo, idx)}
+                                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
 
             <FormField label="备注" hint="入库说明、注意事项等（选填）">
               <textarea
