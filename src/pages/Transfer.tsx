@@ -52,6 +52,12 @@ export default function Transfer() {
   const addItem = () => {
     if (!selectedPartId || itemQty <= 0) return;
     const existing = items.find(i => i.partId === selectedPartId);
+    const totalAfterAdd = existing ? existing.qty + itemQty : itemQty;
+    const availableStock = getPartStock(selectedPartId);
+    if (totalAfterAdd > availableStock) {
+      useStore.getState().addToast('error', `${getPartName(selectedPartId)} 最多可调拨 ${availableStock} 件，已选 ${existing ? existing.qty : 0} 件，再添 ${itemQty} 件会超库存`);
+      return;
+    }
     if (existing) {
       setItems(items.map(i =>
         i.partId === selectedPartId
@@ -73,6 +79,11 @@ export default function Transfer() {
 
   const handleCreate = () => {
     if (!fromStoreId || !toStoreId || items.length === 0) return;
+    const overstock = items.find(item => item.qty > getPartStock(item.partId));
+    if (overstock) {
+      useStore.getState().addToast('error', `${getPartName(overstock.partId)} 调拨数量超过调出门店库存，请修正后再提交`);
+      return;
+    }
     createTransfer(toStoreId, fromStoreId, items, remark);
     setCreateOpen(false);
     setToStoreId('');
@@ -321,7 +332,11 @@ export default function Transfer() {
             <Button
               icon={<Plus className="w-4 h-4" />}
               onClick={handleCreate}
-              disabled={!fromStoreId || !toStoreId || items.length === 0 || fromStoreId === toStoreId}
+              disabled={
+                !fromStoreId || !toStoreId || items.length === 0 ||
+                fromStoreId === toStoreId ||
+                items.some(item => item.qty > getPartStock(item.partId))
+              }
             >
               创建调拨单
             </Button>
@@ -418,7 +433,7 @@ export default function Transfer() {
                             <div className="text-[10px] text-slate-400 font-mono">{p.sku} | {p.location}</div>
                           </div>
                           <div className="text-right">
-                            <div className="text-slate-700 font-mono">库存 {p.stockQty}</div>
+                            <div className="text-slate-700 font-mono">库存 {getPartStock(p.id)}</div>
                             <div className="text-[10px] text-slate-400">{formatCurrency(p.purchasePrice)}</div>
                           </div>
                         </button>
@@ -437,7 +452,10 @@ export default function Transfer() {
                   size="sm"
                   icon={<Plus className="w-3.5 h-3.5" />}
                   onClick={addItem}
-                  disabled={!selectedPartId || itemQty <= 0 || itemQty > getPartStock(selectedPartId)}
+                  disabled={
+                    !selectedPartId || itemQty <= 0 ||
+                    itemQty + (items.find(i => i.partId === selectedPartId)?.qty ?? 0) > getPartStock(selectedPartId)
+                  }
                 >
                   添加
                 </Button>

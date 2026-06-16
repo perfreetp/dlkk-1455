@@ -476,7 +476,7 @@ export const useStore = create<RootState>()(
         parts: state.parts, categories: state.categories, suppliers: state.suppliers,
         stockBatches: state.stockBatches, stockInList: state.stockInList,
         stockOutList: state.stockOutList, transferOrders: state.transferOrders,
-        stores: state.stores, stocktakeOrders: state.stocktakeOrders,
+        stores: state.stores, storeStocks: state.storeStocks, stocktakeOrders: state.stocktakeOrders,
         priceHistory: state.priceHistory, batchPhotos: state.batchPhotos,
         operationLogs: state.operationLogs, employees: state.employees,
         currentUserId: state.currentUserId,
