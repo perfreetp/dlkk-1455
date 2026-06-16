@@ -7,7 +7,7 @@ import type {
   TransferItem, StocktakeItem, PriceField, ToastMessage, PhotoType, StoreStock
 } from '@/types';
 import { uid } from '@/utils/id';
-import { generateOrderNo } from '@/utils/format';
+import { generateOrderNo, transferStatusMap } from '@/utils/format';
 import {
   MOCK_PARTS, MOCK_CATEGORIES, MOCK_SUPPLIERS, MOCK_STOCK_BATCHES,
   MOCK_STOCK_IN, MOCK_STOCK_OUT, MOCK_TRANSFER, MOCK_STORES, MOCK_STORE_STOCKS,
@@ -328,6 +328,14 @@ export const useStore = create<RootState>()(
       shipTransfer: (id) => {
         const order = get().transferOrders.find(t => t.id === id);
         if (!order) return;
+        if (order.status !== 'pending_ship') {
+          get().addToast('warning', `当前状态为「${transferStatusMap[order.status].label}」，无需重复发货`);
+          return;
+        }
+        if (order.stockDeducted) {
+          get().addToast('warning', '该单已扣减调出方库存，不能重复发货');
+          return;
+        }
         for (const item of order.items) {
           const storeStock = get().getPartStockByStore(item.partId, order.fromStoreId);
           if (storeStock < item.qty) {
@@ -356,7 +364,13 @@ export const useStore = create<RootState>()(
       },
       arriveTransfer: (id) => {
         const order = get().transferOrders.find(t => t.id === id);
-        if (!order || order.status !== 'in_transit') return;
+        if (!order) return;
+        if (order.status !== 'in_transit') {
+          if (order.status === 'pending_receive' || order.status === 'completed') {
+            get().addToast('warning', `当前状态为「${transferStatusMap[order.status].label}」，已完成到店流程`);
+          }
+          return;
+        }
         const now = new Date().toISOString();
         set(s => ({
           transferOrders: s.transferOrders.map(t =>
@@ -369,6 +383,14 @@ export const useStore = create<RootState>()(
       receiveTransfer: (id) => {
         const order = get().transferOrders.find(t => t.id === id);
         if (!order) return;
+        if (order.status === 'completed') {
+          get().addToast('warning', '该调拨单已完成，不能重复收货');
+          return;
+        }
+        if (order.status !== 'pending_receive') {
+          get().addToast('warning', `当前状态为「${transferStatusMap[order.status].label}」，还不能确认收货`);
+          return;
+        }
         if (!order.stockDeducted) {
           get().addToast('error', '该单未扣减调出方库存，无法直接收货，请走正常调拨流程');
           return;

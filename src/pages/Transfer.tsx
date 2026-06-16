@@ -8,7 +8,7 @@ import StatusBadge from '@/components/common/StatusBadge';
 import {
   Package, Truck, MapPin, Plus, Search, Send, CheckCircle,
   XCircle, ChevronDown, ChevronUp, Trash2, Building2, User,
-  Calendar, FileText, AlertCircle, ArrowDownToLine
+  Calendar, FileText, AlertCircle, ArrowDownToLine, PlusCircle, MinusCircle
 } from 'lucide-react';
 import { transferStatusMap, formatDateTime, formatCurrency } from '@/utils/format';
 import type { TransferItem } from '@/types';
@@ -31,6 +31,11 @@ export default function Transfer() {
   const [partSearch, setPartSearch] = useState('');
   const [storePartDropdown, setStorePartDropdown] = useState(false);
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'active' | 'completed' | 'cancelled' | 'history'>('active');
+  const [histFromStore, setHistFromStore] = useState('');
+  const [histToStore, setHistToStore] = useState('');
+  const [histPartId, setHistPartId] = useState('');
+  const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
 
   const pendingShipCount = transferOrders.filter(t => t.status === 'pending_ship').length;
   const inTransitCount = transferOrders.filter(t => t.status === 'in_transit').length;
@@ -105,6 +110,44 @@ export default function Transfer() {
   const activeOrders = transferOrders.filter(t =>
     t.status === 'pending_ship' || t.status === 'in_transit' || t.status === 'pending_receive'
   );
+  const completedOrders = transferOrders.filter(t => t.status === 'completed');
+  const cancelledOrders = transferOrders.filter(t => t.status === 'cancelled');
+
+  const filteredHistory = useMemo(() => {
+    return transferOrders.filter(o => {
+      if (histFromStore && o.fromStoreId !== histFromStore) return false;
+      if (histToStore && o.toStoreId !== histToStore) return false;
+      if (histPartId && !o.items.some(i => i.partId === histPartId)) return false;
+      return true;
+    }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [transferOrders, histFromStore, histToStore, histPartId]);
+
+  const historyTotals = useMemo(() => {
+    const byItem = new Map<string, number>();
+    filteredHistory.forEach(o => o.items.forEach(i =>
+      byItem.set(i.partId, (byItem.get(i.partId) ?? 0) + i.qty)
+    ));
+    return {
+      orders: filteredHistory.length,
+      totalQty: filteredHistory.reduce((s, o) => s + o.items.reduce((a, i) => a + i.qty, 0), 0),
+      byItem,
+    };
+  }, [filteredHistory]);
+
+  const runSafe = async (id: string, action: () => void) => {
+    if (loadingIds.has(id)) {
+      useStore.getState().addToast('warning', '操作进行中，请勿重复点击');
+      return;
+    }
+    setLoadingIds(s => new Set(s).add(id));
+    try {
+      action();
+    } finally {
+      setTimeout(() => {
+        setLoadingIds(s => { const n = new Set(s); n.delete(id); return n; });
+      }, 500);
+    }
+  };
 
   const getStoreName = (id: string) => useStore.getState().getStoreById(id)?.name ?? '-';
   const getPartName = (id: string) => useStore.getState().getPartById(id)?.name ?? '-';
@@ -159,25 +202,127 @@ export default function Transfer() {
       </div>
 
       <div className="bg-white rounded-[2px] border border-slate-200 shadow-sm">
-        <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <FileText className="w-4 h-4 text-slate-500" />
-            <span className="font-semibold text-slate-700 text-sm">进行中的调拨单</span>
-            <span className="text-xs text-slate-400">{activeOrders.length} 单</span>
-          </div>
+        <div className="px-5 py-3 border-b border-slate-200 flex items-center gap-6">
+          {[
+            { key: 'active', label: '进行中', count: activeOrders.length },
+            { key: 'completed', label: '已完成', count: completedOrders.length },
+            { key: 'cancelled', label: '已取消', count: cancelledOrders.length },
+            { key: 'history', label: '历史查询', count: null },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key as typeof activeTab)}
+              className={cn(
+                'relative py-3 text-sm font-medium transition-colors flex items-center gap-1.5',
+                activeTab === tab.key ? 'text-amber-600' : 'text-slate-500 hover:text-slate-700'
+              )}
+            >
+              {tab.label}
+              {tab.count !== null && (
+                <span className={cn(
+                  'px-1.5 py-0.5 rounded-full text-[10px] font-mono',
+                  activeTab === tab.key ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'
+                )}>
+                  {tab.count}
+                </span>
+              )}
+              {activeTab === tab.key && (
+                <span className="absolute left-0 right-0 -bottom-3 h-0.5 bg-amber-500 rounded-full" />
+              )}
+            </button>
+          ))}
         </div>
 
-        {activeOrders.length === 0 ? (
-          <div className="py-16 flex flex-col items-center justify-center text-slate-400">
-            <Package className="w-12 h-12 mb-3 opacity-40" />
-            <p className="text-sm">暂无进行中的调拨单</p>
+        {activeTab === 'history' && (
+          <div className="px-5 py-4 bg-slate-50/60 border-b border-slate-200">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">调出门店</label>
+                <select
+                  value={histFromStore}
+                  onChange={e => setHistFromStore(e.target.value)}
+                  className="w-full h-8 rounded-[2px] border border-slate-300 bg-white text-xs px-2.5 focus:outline-none focus:ring-1 focus:ring-amber-400 focus:border-amber-400"
+                >
+                  <option value="">全部</option>
+                  {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">调入门店</label>
+                <select
+                  value={histToStore}
+                  onChange={e => setHistToStore(e.target.value)}
+                  className="w-full h-8 rounded-[2px] border border-slate-300 bg-white text-xs px-2.5 focus:outline-none focus:ring-1 focus:ring-amber-400 focus:border-amber-400"
+                >
+                  <option value="">全部</option>
+                  {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">备件</label>
+                <select
+                  value={histPartId}
+                  onChange={e => setHistPartId(e.target.value)}
+                  className="w-full h-8 rounded-[2px] border border-slate-300 bg-white text-xs px-2.5 focus:outline-none focus:ring-1 focus:ring-amber-400 focus:border-amber-400"
+                >
+                  <option value="">全部</option>
+                  {parts.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
+                </select>
+              </div>
+              <div className="flex items-end gap-2">
+                <div className="flex-1 px-3 py-1.5 bg-white rounded-[2px] border border-slate-200 text-xs">
+                  <span className="text-slate-400">结果：</span>
+                  <span className="font-semibold text-slate-700">{historyTotals.orders} 单</span>
+                  <span className="text-slate-300 mx-1.5">|</span>
+                  <span className="text-slate-400">合计：</span>
+                  <span className="font-semibold text-amber-600 font-mono">{historyTotals.totalQty} 件</span>
+                </div>
+                <button
+                  onClick={() => { setHistFromStore(''); setHistToStore(''); setHistPartId(''); }}
+                  className="h-8 px-3 rounded-[2px] text-xs border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                >
+                  重置
+                </button>
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {activeOrders.map(order => {
-              const isExpanded = expandedOrder === order.id;
-              const statusInfo = transferStatusMap[order.status];
-              const orderItemTotal = order.items.reduce((s, i) => s + i.qty, 0);
+        )}
+
+        {(() => {
+          let orders: typeof transferOrders = [];
+          if (activeTab === 'active') orders = activeOrders;
+          else if (activeTab === 'completed') orders = completedOrders;
+          else if (activeTab === 'cancelled') orders = cancelledOrders;
+          else orders = filteredHistory;
+
+          if (orders.length === 0) {
+            return (
+              <div className="py-16 flex flex-col items-center justify-center text-slate-400">
+                <FileText className="w-12 h-12 mb-3 opacity-40" />
+                <p className="text-sm">
+                  {activeTab === 'active' && '暂无进行中的调拨单'}
+                  {activeTab === 'completed' && '暂无已完成的调拨单'}
+                  {activeTab === 'cancelled' && '暂无已取消的调拨单'}
+                  {activeTab === 'history' && '没有匹配的调拨记录'}
+                </p>
+              </div>
+            );
+          }
+
+          return (
+            <div className="divide-y divide-slate-100">
+              {orders.map(order => {
+                const isExpanded = expandedOrder === order.id;
+                const statusInfo = transferStatusMap[order.status];
+                const orderItemTotal = order.items.reduce((s, i) => s + i.qty, 0);
+                const isLoading = loadingIds.has(order.id);
+                const timeline = [
+                  { key: 'created', label: '创建申请', time: order.createdAt, done: true, effect: '待库存扣减', icon: FileText },
+                  { key: 'shipped', label: '确认发货', time: order.shippedAt, done: !!order.shippedAt, effect: order.stockDeducted ? `调出方扣减 ${orderItemTotal} 件` : '', icon: Send },
+                  { key: 'arrived', label: '到店待签收', time: order.arrivedAt, done: !!order.arrivedAt, effect: '', icon: ArrowDownToLine },
+                  { key: 'received', label: '确认收货', time: order.receivedAt, done: !!order.receivedAt, effect: order.status === 'completed' ? `调入方增加 ${orderItemTotal} 件` : '', icon: CheckCircle },
+                  { key: 'cancelled', label: '已取消', time: null, done: order.status === 'cancelled', effect: order.status === 'cancelled' && order.stockDeducted ? `恢复调出方 ${orderItemTotal} 件` : '', icon: XCircle },
+                ];
               return (
                 <div key={order.id} className="hover:bg-slate-50/60 transition-colors">
                   <div
@@ -217,7 +362,8 @@ export default function Transfer() {
                           <Button
                             size="sm"
                             icon={<Send className="w-3.5 h-3.5" />}
-                            onClick={(e) => { e.stopPropagation(); shipTransfer(order.id); }}
+                            loading={isLoading}
+                            onClick={(e) => { e.stopPropagation(); runSafe(order.id, () => shipTransfer(order.id)); }}
                           >
                             发货
                           </Button>
@@ -225,8 +371,9 @@ export default function Transfer() {
                             size="sm"
                             variant="ghost"
                             icon={<XCircle className="w-3.5 h-3.5" />}
+                            loading={isLoading}
                             className="text-red-500 hover:text-red-600 hover:bg-red-50"
-                            onClick={(e) => { e.stopPropagation(); cancelTransfer(order.id); }}
+                            onClick={(e) => { e.stopPropagation(); runSafe(order.id, () => cancelTransfer(order.id)); }}
                           >
                             取消
                           </Button>
@@ -237,7 +384,8 @@ export default function Transfer() {
                           size="sm"
                           variant="secondary"
                           icon={<ArrowDownToLine className="w-3.5 h-3.5" />}
-                          onClick={(e) => { e.stopPropagation(); arriveTransfer(order.id); }}
+                          loading={isLoading}
+                          onClick={(e) => { e.stopPropagation(); runSafe(order.id, () => arriveTransfer(order.id)); }}
                         >
                           确认到店
                         </Button>
@@ -247,7 +395,8 @@ export default function Transfer() {
                           size="sm"
                           variant="primary"
                           icon={<CheckCircle className="w-3.5 h-3.5" />}
-                          onClick={(e) => { e.stopPropagation(); receiveTransfer(order.id); }}
+                          loading={isLoading}
+                          onClick={(e) => { e.stopPropagation(); runSafe(order.id, () => receiveTransfer(order.id)); }}
                         >
                           确认收货
                         </Button>
@@ -255,62 +404,124 @@ export default function Transfer() {
                       {order.status === 'completed' && (
                         <StatusBadge label="已完成" className="bg-emerald-50 text-emerald-600 border-emerald-200" />
                       )}
+                      {order.status === 'cancelled' && (
+                        <StatusBadge label="已取消" className="bg-slate-100 text-slate-500 border-slate-200" />
+                      )}
                     </div>
                   </div>
                   {isExpanded && (
                     <div className="px-5 pb-4 pt-0">
-                      <div className="ml-9 bg-slate-50 rounded border border-slate-200 p-4">
-                        {order.remark && (
-                          <div className="mb-3 text-xs text-slate-600">
-                            <span className="text-slate-400">备注：</span>{order.remark}
-                          </div>
-                        )}
-                        <div className="mb-3 grid grid-cols-3 gap-3 text-[11px]">
-                          <div className="bg-white rounded border border-slate-200 p-2">
-                            <div className="text-slate-400 mb-1">调出门店</div>
-                            <div className="font-semibold text-slate-700">{getStoreName(order.fromStoreId)}</div>
-                          </div>
-                          <div className="bg-white rounded border border-slate-200 p-2">
-                            <div className="text-slate-400 mb-1">调入门店</div>
-                            <div className="font-semibold text-slate-700">{getStoreName(order.toStoreId)}</div>
-                          </div>
-                          <div className="bg-white rounded border border-slate-200 p-2">
-                            <div className="text-slate-400 mb-1">库存状态</div>
-                            <div className="font-semibold text-slate-700">
-                              {order.status === 'pending_ship' && order.stockDeducted && '已扣减调出'}
-                              {order.status === 'pending_ship' && !order.stockDeducted && '待扣减'}
-                              {(order.status === 'in_transit' || order.status === 'pending_receive') && order.stockDeducted && '调出已扣、调入待加'}
-                              {order.status === 'completed' && '两边已对平'}
-                              {order.status === 'cancelled' && '已取消'}
+                      <div className="ml-9 space-y-3">
+                        <div className="bg-slate-50 rounded border border-slate-200 p-4">
+                          {order.remark && (
+                            <div className="mb-3 text-xs text-slate-600">
+                              <span className="text-slate-400">备注：</span>{order.remark}
+                            </div>
+                          )}
+                          <div className="mb-3 grid grid-cols-3 gap-3 text-[11px]">
+                            <div className="bg-white rounded border border-slate-200 p-2">
+                              <div className="text-slate-400 mb-1">调出门店</div>
+                              <div className="font-semibold text-slate-700">{getStoreName(order.fromStoreId)}</div>
+                            </div>
+                            <div className="bg-white rounded border border-slate-200 p-2">
+                              <div className="text-slate-400 mb-1">调入门店</div>
+                              <div className="font-semibold text-slate-700">{getStoreName(order.toStoreId)}</div>
+                            </div>
+                            <div className="bg-white rounded border border-slate-200 p-2">
+                              <div className="text-slate-400 mb-1">库存状态</div>
+                              <div className="font-semibold text-slate-700">
+                                {order.status === 'pending_ship' && order.stockDeducted && '已扣减调出'}
+                                {order.status === 'pending_ship' && !order.stockDeducted && '待扣减'}
+                                {(order.status === 'in_transit' || order.status === 'pending_receive') && order.stockDeducted && '调出已扣、调入待加'}
+                                {order.status === 'completed' && '两边已对平'}
+                                {order.status === 'cancelled' && (order.stockDeducted ? '已恢复调出' : '未动库存')}
+                              </div>
                             </div>
                           </div>
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+                                <th className="pb-2 font-medium">备件名称</th>
+                                <th className="pb-2 font-medium">SKU</th>
+                                <th className="pb-2 font-medium text-right">调拨数量</th>
+                                <th className="pb-2 font-medium text-right">调出方库存</th>
+                                <th className="pb-2 font-medium text-right">调入方库存</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {order.items.map(item => {
+                                const fromStock = getPartStockByStore(item.partId, order.fromStoreId);
+                                const toStock = getPartStockByStore(item.partId, order.toStoreId);
+                                return (
+                                  <tr key={item.partId}>
+                                    <td className="py-2 text-slate-700 font-medium">{getPartName(item.partId)}</td>
+                                    <td className="py-2 text-slate-500 font-mono text-xs">{getPartSku(item.partId)}</td>
+                                    <td className="py-2 text-right font-mono font-semibold text-slate-800">{item.qty}</td>
+                                    <td className="py-2 text-right font-mono text-slate-600">{fromStock}</td>
+                                    <td className="py-2 text-right font-mono text-slate-600">{toStock}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
-                              <th className="pb-2 font-medium">备件名称</th>
-                              <th className="pb-2 font-medium">SKU</th>
-                              <th className="pb-2 font-medium text-right">调拨数量</th>
-                              <th className="pb-2 font-medium text-right">调出方库存</th>
-                              <th className="pb-2 font-medium text-right">调入方库存</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {order.items.map(item => {
-                              const fromStock = getPartStockByStore(item.partId, order.fromStoreId);
-                              const toStock = getPartStockByStore(item.partId, order.toStoreId);
+
+                        <div className="bg-white rounded border border-slate-200 p-4">
+                          <div className="flex items-center gap-2 mb-3">
+                            <FileText className="w-3.5 h-3.5 text-slate-500" />
+                            <span className="text-xs font-semibold text-slate-700">流转时间线</span>
+                          </div>
+                          <div className="space-y-0">
+                            {timeline.map((step, idx) => {
+                              const Icon = step.icon;
+                              const isLast = idx === timeline.length - 1;
                               return (
-                                <tr key={item.partId}>
-                                  <td className="py-2 text-slate-700 font-medium">{getPartName(item.partId)}</td>
-                                  <td className="py-2 text-slate-500 font-mono text-xs">{getPartSku(item.partId)}</td>
-                                  <td className="py-2 text-right font-mono font-semibold text-slate-800">{item.qty}</td>
-                                  <td className="py-2 text-right font-mono text-slate-600">{fromStock}</td>
-                                  <td className="py-2 text-right font-mono text-slate-600">{toStock}</td>
-                                </tr>
+                                <div key={step.key} className="flex gap-3 relative">
+                                  {!isLast && (
+                                    <div className={cn(
+                                      'absolute left-[14px] top-7 bottom-0 w-0.5',
+                                      step.done ? 'bg-amber-300' : 'bg-slate-200'
+                                    )} />
+                                  )}
+                                  <div className={cn(
+                                    'w-7 h-7 rounded-full shrink-0 flex items-center justify-center z-10 border-2',
+                                    step.done
+                                      ? 'bg-amber-50 border-amber-400 text-amber-600'
+                                      : 'bg-white border-slate-200 text-slate-300'
+                                  )}>
+                                    <Icon className="w-3.5 h-3.5" />
+                                  </div>
+                                  <div className="flex-1 pb-3">
+                                    <div className="flex items-center justify-between mb-0.5">
+                                      <span className={cn(
+                                        'text-sm font-medium',
+                                        step.done ? 'text-slate-800' : 'text-slate-400'
+                                      )}>{step.label}</span>
+                                      {step.time && (
+                                        <span className="text-[10px] text-slate-400 font-mono">
+                                          {formatDateTime(step.time)}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {step.effect && (
+                                      <div className={cn(
+                                        'text-[11px] inline-flex items-center gap-1 px-2 py-0.5 rounded',
+                                        step.key === 'shipped' && step.done && 'bg-red-50 text-red-600',
+                                        step.key === 'received' && step.done && 'bg-emerald-50 text-emerald-600',
+                                        step.key === 'cancelled' && step.done && 'bg-slate-100 text-slate-500',
+                                        step.key === 'created' && 'bg-slate-100 text-slate-500'
+                                      )}>
+                                        {step.key === 'shipped' && step.done && <MinusCircle className="w-3 h-3" />}
+                                        {step.key === 'received' && step.done && <PlusCircle className="w-3 h-3" />}
+                                        {step.effect}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
                               );
                             })}
-                          </tbody>
-                        </table>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -319,6 +530,9 @@ export default function Transfer() {
             })}
           </div>
         )}
+      </div>
+      );
+    })()}
       </div>
 
       <Modal

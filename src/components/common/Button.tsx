@@ -1,13 +1,15 @@
 import { cn } from '@/lib/utils';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { LoaderCircle } from 'lucide-react';
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'outline';
   size?: 'sm' | 'md' | 'lg';
   icon?: ReactNode;
+  loading?: boolean;
 }
 
-export default function Button({ variant = 'primary', size = 'md', icon, className = '', children, ...rest }: Props) {
+export default function Button({ variant = 'primary', size = 'md', icon, className = '', children, loading, disabled, ...rest }: Props) {
   const variants = {
     primary: 'bg-accent-amber text-white hover:bg-amber-600 active:bg-amber-700 shadow-sm',
     secondary: 'bg-slate-800 text-white hover:bg-slate-900',
@@ -20,15 +22,18 @@ export default function Button({ variant = 'primary', size = 'md', icon, classNa
     md: 'h-9 px-3.5 text-sm gap-1.5',
     lg: 'h-11 px-5 text-sm gap-2',
   };
+  const isDisabled = disabled || loading;
+  const displayIcon = loading ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : icon;
   return (
     <button
       className={cn(
         'inline-flex items-center justify-center rounded-[2px] font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-amber-400 disabled:opacity-50 disabled:cursor-not-allowed',
         variants[variant], sizes[size], className
       )}
+      disabled={isDisabled}
       {...rest}
     >
-      {icon}
+      {displayIcon}
       {children}
     </button>
   );
