@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+    line-height: 1.5;
+    font-weight: 400;
+    color: #0f172a;
+    background-color: #f8fafc;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    margin: 0;
+    min-width: 1280px;
+    min-height: 100vh;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white border border-slate-200 rounded-[2px] shadow-card;
+  }
+  .card-hover {
+    @apply hover:shadow-card-hover transition-shadow;
+  }
+  .data-table {
+    @apply w-full border-collapse;
+  }
+  .data-table thead th {
+    @apply text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider px-3 py-2.5 bg-slate-50 border-b border-slate-200 whitespace-nowrap;
+  }
+  .data-table tbody td {
+    @apply px-3 py-2.5 text-sm text-slate-700 border-b border-slate-100;
+  }
+  .data-table tbody tr:hover {
+    @apply bg-amber-50/40;
+  }
+  .data-table tbody tr:nth-child(even) {
+    @apply bg-slate-50/30;
+  }
+  .data-table tbody tr:nth-child(even):hover {
+    @apply bg-amber-50/40;
+  }
+  .tab-btn {
+    @apply px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap;
+  }
+  .tab-btn-active {
+    @apply text-accent-amber border-accent-amber;
+  }
+  .tab-btn-inactive {
+    @apply text-slate-500 border-transparent hover:text-slate-700 hover:border-slate-300;
+  }
+  .radio-card {
+    @apply relative flex items-center gap-3 px-4 py-3 border rounded-[2px] cursor-pointer transition-all;
+  }
+  .radio-card-checked {
+    @apply border-amber-400 bg-amber-50 ring-1 ring-amber-400/30;
+  }
+  .radio-card-unchecked {
+    @apply border-slate-200 hover:border-slate-300 hover:bg-slate-50;
+  }
+  .chip {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600;
+  }
+  .chip-active {
+    @apply bg-amber-100 text-amber-800;
+  }
+}
+
+@layer utilities {
+  .font-num {
+    font-family: 'JetBrains Mono', Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .animate-in {
+    animation: fadeInSlide 0.2s ease-out;
+  }
+  .slide-in-from-right {
+    animation-name: slideInRight;
+  }
+}
+
+@keyframes fadeInSlide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
